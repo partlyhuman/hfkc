@@ -1,0 +1,16 @@
+{
+  "name": "parcel-vanilla-starter",
+  "private": true,
+  "version": "0.0.0",
+  "source": "src/index.html",
+  "scripts": {
+    "start": "parcel",
+    "build": "parcel build"
+  },
+  "devDependencies": {
+    "@types/web-bluetooth": "^0.0.21",
+    "parcel": "^2.14.0",
+    "typescript": "^5.9.3"
+  },
+  "browserslist": "Chrome >= 56, Edge >= 79, supports es6-module"
+}
