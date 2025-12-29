@@ -14,8 +14,8 @@ $('#pair').addEventListener('click', async () => {
 $('#connect').addEventListener('click', async () => {
     server.addEventListener('update', (e) => {
         const {rowCount, stitchCount} = (e as CustomEvent).detail;
-        $('#knit-count').innerHTML = stitchCount.toString();
         $('#row-count').innerHTML = rowCount.toString();
+        $('#stitch-count').innerHTML = stitchCount.toString();
     });
     await server.connect();
     console.log('connected');
