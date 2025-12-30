@@ -1,11 +1,7 @@
-#include <Preferences.h>
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <AceButton.h>
-#include <Wire.h>
-#include <Adafruit_SSD1306.h>
-// #include <Fonts/FreeSansBold18pt7b.h>
 
 using namespace ace_button;
 
@@ -13,23 +9,15 @@ const int BUTTON_PIN = 0;
 static AceButton button(BUTTON_PIN);
 
 static BLEUUID SERVICE_HKFC("49feaff1-039c-4702-b544-6d50dde1e1a1");
-static BLEUUID CHARACTERISTIC_ROW("569c944a-3623-4126-9b58-f03277c5879c");
-static BLEUUID CHARACTERISTIC_STITCH("13be5c7d-bc86-43a4-8a54-f7ff294389fb");
-// static BLEUUID CHARACTERISTIC_COUNT16((uint16_t)0x2AEA);
+static BLEUUID CHARACTERISTIC_ROW_STITCH("13be5c7d-bc86-43a4-8a54-f7ff294389fb");
 static BLEUUID CHARACTERISTIC_USER_DESCRIPTION((uint16_t)0x2901);
+static BLECharacteristic *countCharacteristic;
 
-static BLECharacteristic *rowCharacteristic;
-static BLECharacteristic *stitchCharacteristic;
-
-uint16_t rowCount = 0;
-uint16_t stitchCount = 0;
-
-Adafruit_SSD1306 display(128, 32, &Wire, -1);
-
-Preferences prefs;
-static const char *NV_NAME = "HFKC";
-static const char *NV_ADDR_ROW = "r";
-static const char *NV_ADDR_STITCH = "s";
+typedef struct _CombinedCount {
+  uint16_t row;
+  uint16_t stitch;
+} CombinedCount;
+CombinedCount count;
 
 void flashLED(int count = 1, int dur = 150) {
   for (int i = 0; i < count; i++) {
@@ -40,59 +28,12 @@ void flashLED(int count = 1, int dur = 150) {
   }
 }
 
-void updateNonVolatile() {
-  // prefs.begin(NV_NAME);
-  prefs.putUShort(NV_ADDR_ROW, rowCount);
-  prefs.putUShort(NV_ADDR_STITCH, stitchCount);
-  // prefs.end();
-}
-
-void initNonVolatile() {
-  if (!prefs.begin(NV_NAME)) {
-    Serial.println("prefs init fail");
-    flashLED(5);
-    return;
-  }
-  if (prefs.isKey(NV_ADDR_ROW)) {
-    rowCount = prefs.getUShort(NV_ADDR_ROW);
-  }
-  if (prefs.isKey(NV_ADDR_STITCH)) {
-    stitchCount = prefs.getUShort(NV_ADDR_STITCH);
-  }
-  // prefs.end();
-}
-
-void updateDisplay() {
-  display.clearDisplay();
-
-  display.setTextSize(1);               // Normal 1:1 pixel scale
-  display.setTextColor(SSD1306_WHITE);  // Draw white text
-  display.cp437(true);                  // Use full 256 char 'Code Page 437' font
-
-  static char string[64] = "";
-
-  sprintf(string, "Row %d", rowCount);
-  display.setCursor(0, 0);
-  display.println(string);
-
-  sprintf(string, "Stitch %d", stitchCount);
-  display.setCursor(64, 0);
-  display.println(string);
-
-  display.display();
-}
-
-void updateCharacteristics() {
-  stitchCharacteristic->setValue(stitchCount);
-  stitchCharacteristic->notify();
-  rowCharacteristic->setValue(rowCount);
-  rowCharacteristic->notify();
-}
-
 void updateAll() {
-  updateCharacteristics();
-  updateDisplay();
-  updateNonVolatile();
+  countCharacteristic->setValue((uint8_t *)&count, sizeof(CombinedCount));
+  countCharacteristic->notify();
+
+  displayUpdate();
+  prefsUpdate();
 }
 
 void handleButtonEvent(AceButton *_button, uint8_t eventType, uint8_t buttonState) {
@@ -104,12 +45,12 @@ void handleButtonEvent(AceButton *_button, uint8_t eventType, uint8_t buttonStat
       digitalWrite(LED_BUILTIN, HIGH);
       break;
     case AceButton::kEventClicked:
-      stitchCount++;
+      count.stitch++;
       updateAll();
       break;
     case AceButton::kEventLongPressed:
-      stitchCount = 0;
-      rowCount++;
+      count.stitch = 0;
+      count.row++;
       updateAll();
       break;
   }
@@ -131,12 +72,9 @@ class ServerCallbacks : public BLEServerCallbacks {
   }
 };
 
-
 void setup() {
   Serial.begin(115200);
   delay(100);
-  Serial.println("Serial test");
-  log_i("log_i test");
 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);  // ESP32 uses low for on
@@ -152,45 +90,23 @@ void setup() {
   buttonConfig->setEventHandler(handleButtonEvent);
 
   // Default pin 8 overlaps with LED pin, use custom pins
-  Wire.setPins(1, 2);
-  Wire.begin();
-  // See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
-  const uint8_t SCREEN_ADDRESS = 0x3C;
-  if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    log_e("Display begin fail");
-    flashLED(10);
-  }
-  // Too big?
-  // display.setFont(&FreeSansBold18pt7b);
+  displaySetup();
 
   // Restore from EEPROM - or reset when booted with button depressed
-  if (bootedWithButtonPressed) {
-    Serial.println("Booted with button pressed, skipping init");
-  } else {
-    Serial.println("Init from prefs");
-    initNonVolatile();
-    Serial.println("Done");
-  }
+  prefsSetup(!bootedWithButtonPressed);
 
   BLEDevice::init("Hands-Free Knit Counter");
+
   BLEServer *server = BLEDevice::createServer();
   server->setCallbacks(new ServerCallbacks());
+
   BLEService *service = server->createService(SERVICE_HKFC);
-
-  stitchCharacteristic = service->createCharacteristic(
-    CHARACTERISTIC_STITCH,
+  countCharacteristic = service->createCharacteristic(
+    CHARACTERISTIC_ROW_STITCH,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
-  stitchCharacteristic->setValue((uint16_t)0);
-  stitchCharacteristic->addDescriptor(userDescription("Stitch Count"));
-
-  rowCharacteristic = service->createCharacteristic(
-    CHARACTERISTIC_ROW,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
-  rowCharacteristic->setValue((uint16_t)0);
-  rowCharacteristic->addDescriptor(userDescription("Row Count"));
-
+  countCharacteristic->addDescriptor(userDescription("Stitch Count"));
   service->start();
-  
+
   BLEAdvertising *advertising = BLEDevice::getAdvertising();
   advertising->addServiceUUID(SERVICE_HKFC);
   advertising->setScanResponse(true);
@@ -199,8 +115,8 @@ void setup() {
   advertising->setMaxPreferred(0x12);
   BLEDevice::startAdvertising();
 
-  updateDisplay();
-  log_i("Setup complete\r\n");
+  updateAll();
+  log_i("Setup complete");
 }
 
 void loop() {
