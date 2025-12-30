@@ -6,12 +6,9 @@ const server = new HandsFreeKnitCounter();
 // @ts-ignore
 window['hfkc'] = server;
 
-$('#pair').addEventListener('click', async () => {
-    await server.request();
-    console.log('requested');
-});
-
 $('#connect').addEventListener('click', async () => {
+    await server.pair();
+    console.log('requested');
     server.addEventListener('update', (e) => {
         const {rowCount, stitchCount} = (e as CustomEvent).detail;
         $('#row-count').innerHTML = rowCount.toString();

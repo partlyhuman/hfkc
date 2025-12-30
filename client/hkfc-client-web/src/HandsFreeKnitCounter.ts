@@ -1,6 +1,7 @@
 const SERVICE_HKFC = "49feaff1-039c-4702-b544-6d50dde1e1a1"
 const CHARACTERISTIC_STITCH = "13be5c7d-bc86-43a4-8a54-f7ff294389fb"
 const CHARACTERISTIC_ROW = "569c944a-3623-4126-9b58-f03277c5879c"
+const DEVICE_NAME = "Hands-Free Knit Counter";
 
 export class HandsFreeKnitCounter implements EventTarget {
     private device: BluetoothDevice | undefined;
@@ -23,12 +24,16 @@ export class HandsFreeKnitCounter implements EventTarget {
     constructor() {
         this.onDisconnected = this.onDisconnected.bind(this);
         this.onCharacteristicValueChanged = this.onCharacteristicValueChanged.bind(this);
+        // Try and disconnect cleanly
+        window.addEventListener("beforeunload", () => {
+            this.disconnect();
+        });
     }
 
-    async request() {
+    async pair() {
         this.device = await navigator.bluetooth.requestDevice({
-            "filters": [{"name": "Hands-Free Knit Counter"}],
-            "optionalServices": [SERVICE_HKFC]
+            filters: [{name: DEVICE_NAME}],
+            optionalServices: [SERVICE_HKFC],
         });
         if (!this.device) {
             throw "No device selected";
@@ -38,9 +43,10 @@ export class HandsFreeKnitCounter implements EventTarget {
 
     async connect() {
         if (!this.device) {
-            return Promise.reject('Device is not connected.');
+            throw new Error("Device not found, try pairing");
         }
         await this.device.gatt?.connect();
+        this.device.addEventListener('gattserverdisconnected', this.onDisconnected);
         this.service = await this.device.gatt?.getPrimaryService(SERVICE_HKFC);
         this.stitchCharacteristic = await this.service?.getCharacteristic(CHARACTERISTIC_STITCH);
         this.rowCharacteristic = await this.service?.getCharacteristic(CHARACTERISTIC_ROW);
@@ -112,14 +118,11 @@ export class HandsFreeKnitCounter implements EventTarget {
     }
 
     disconnect() {
-        if (!this.device) {
-            throw new Error('Device is not connected.');
-        }
-        return this.device.gatt?.disconnect();
+        this.device?.gatt?.disconnect();
     }
 
     onDisconnected() {
-        console.log('Device is disconnected.');
+        console.log('Device disconnected.');
     }
 
     addEventListener(type: string, callback: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void {

@@ -1,3 +1,4 @@
+#include <Preferences.h>
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
@@ -25,6 +26,42 @@ uint16_t stitchCount = 0;
 
 Adafruit_SSD1306 display(128, 32, &Wire, -1);
 
+Preferences prefs;
+static const char *NV_NAME = "HFKC";
+static const char *NV_ADDR_ROW = "r";
+static const char *NV_ADDR_STITCH = "s";
+
+void flashLED(int count = 1, int dur = 150) {
+  for (int i = 0; i < count; i++) {
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(dur);
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(dur);
+  }
+}
+
+void updateNonVolatile() {
+  // prefs.begin(NV_NAME);
+  prefs.putUShort(NV_ADDR_ROW, rowCount);
+  prefs.putUShort(NV_ADDR_STITCH, stitchCount);
+  // prefs.end();
+}
+
+void initNonVolatile() {
+  if (!prefs.begin(NV_NAME)) {
+    Serial.println("prefs init fail");
+    flashLED(5);
+    return;
+  }
+  if (prefs.isKey(NV_ADDR_ROW)) {
+    rowCount = prefs.getUShort(NV_ADDR_ROW);
+  }
+  if (prefs.isKey(NV_ADDR_STITCH)) {
+    stitchCount = prefs.getUShort(NV_ADDR_STITCH);
+  }
+  // prefs.end();
+}
+
 void updateDisplay() {
   display.clearDisplay();
 
@@ -45,7 +82,20 @@ void updateDisplay() {
   display.display();
 }
 
-void handleEvent(AceButton *_button, uint8_t eventType, uint8_t buttonState) {
+void updateCharacteristics() {
+  stitchCharacteristic->setValue(stitchCount);
+  stitchCharacteristic->notify();
+  rowCharacteristic->setValue(rowCount);
+  rowCharacteristic->notify();
+}
+
+void updateAll() {
+  updateCharacteristics();
+  updateDisplay();
+  updateNonVolatile();
+}
+
+void handleButtonEvent(AceButton *_button, uint8_t eventType, uint8_t buttonState) {
   switch (eventType) {
     case AceButton::kEventPressed:
       digitalWrite(LED_BUILTIN, LOW);
@@ -54,18 +104,13 @@ void handleEvent(AceButton *_button, uint8_t eventType, uint8_t buttonState) {
       digitalWrite(LED_BUILTIN, HIGH);
       break;
     case AceButton::kEventClicked:
-      stitchCharacteristic->setValue(++stitchCount);
-      stitchCharacteristic->notify();
-      updateDisplay();
+      stitchCount++;
+      updateAll();
       break;
     case AceButton::kEventLongPressed:
       stitchCount = 0;
       rowCount++;
-      stitchCharacteristic->setValue(stitchCount);
-      stitchCharacteristic->notify();
-      rowCharacteristic->setValue(rowCount);
-      rowCharacteristic->notify();
-      updateDisplay();
+      updateAll();
       break;
   }
 }
@@ -76,13 +121,27 @@ BLEDescriptor *userDescription(const char *str) {
   return desc;
 }
 
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer *_server) override {
+    log_i("Client connected");
+  }
+  void onDisconnect(BLEServer *_server) override {
+    log_i("BT: disconnect, restarting advertising");
+    BLEDevice::startAdvertising();
+  }
+};
+
+
 void setup() {
-  // Serial.begin(115200);
-  // Serial.println("Starting BLE work!");
+  Serial.begin(115200);
+  delay(100);
+  Serial.println("Serial test");
+  log_i("log_i test");
 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);  // ESP32 uses low for on
   pinMode(BUTTON_PIN, INPUT_PULLUP);
+  bool bootedWithButtonPressed = digitalRead(BUTTON_PIN) == LOW;
 
   ButtonConfig *buttonConfig = button.getButtonConfig();
   buttonConfig->setDebounceDelay(1);
@@ -90,46 +149,58 @@ void setup() {
   buttonConfig->setLongPressDelay(1000);
   buttonConfig->setFeature(ButtonConfig::kFeatureClick);
   buttonConfig->setFeature(ButtonConfig::kFeatureLongPress);
-  buttonConfig->setEventHandler(handleEvent);
+  buttonConfig->setEventHandler(handleButtonEvent);
 
   // Default pin 8 overlaps with LED pin, use custom pins
   Wire.setPins(1, 2);
   Wire.begin();
   // See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
-  const uint8_t SCREEN_ADDRESS = 0x3C; 
+  const uint8_t SCREEN_ADDRESS = 0x3C;
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    // Serial.println(F("SSD1306 allocation failed"));
-    digitalWrite(LED_BUILTIN, LOW);
+    log_e("Display begin fail");
+    flashLED(10);
   }
   // Too big?
   // display.setFont(&FreeSansBold18pt7b);
-  updateDisplay();
+
+  // Restore from EEPROM - or reset when booted with button depressed
+  if (bootedWithButtonPressed) {
+    Serial.println("Booted with button pressed, skipping init");
+  } else {
+    Serial.println("Init from prefs");
+    initNonVolatile();
+    Serial.println("Done");
+  }
 
   BLEDevice::init("Hands-Free Knit Counter");
-  BLEServer *pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService(SERVICE_HKFC);
+  BLEServer *server = BLEDevice::createServer();
+  server->setCallbacks(new ServerCallbacks());
+  BLEService *service = server->createService(SERVICE_HKFC);
 
-  stitchCharacteristic = pService->createCharacteristic(
+  stitchCharacteristic = service->createCharacteristic(
     CHARACTERISTIC_STITCH,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
   stitchCharacteristic->setValue((uint16_t)0);
   stitchCharacteristic->addDescriptor(userDescription("Stitch Count"));
 
-  rowCharacteristic = pService->createCharacteristic(
+  rowCharacteristic = service->createCharacteristic(
     CHARACTERISTIC_ROW,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
   rowCharacteristic->setValue((uint16_t)0);
   rowCharacteristic->addDescriptor(userDescription("Row Count"));
 
-  pService->start();
-  // BLEAdvertising *pAdvertising = pServer->getAdvertising();  // this still is working for backward compatibility
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_HKFC);
-  pAdvertising->setScanResponse(true);
+  service->start();
+  
+  BLEAdvertising *advertising = BLEDevice::getAdvertising();
+  advertising->addServiceUUID(SERVICE_HKFC);
+  advertising->setScanResponse(true);
   // functions that help with iPhone connections issue
-  pAdvertising->setMinPreferred(0x06);
-  pAdvertising->setMaxPreferred(0x12);
+  advertising->setMinPreferred(0x06);
+  advertising->setMaxPreferred(0x12);
   BLEDevice::startAdvertising();
+
+  updateDisplay();
+  log_i("Setup complete\r\n");
 }
 
 void loop() {
