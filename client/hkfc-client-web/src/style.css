@@ -1,8 +1,23 @@
 html {
-  color-scheme: light dark;
-  font-family: system-ui;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
+    color-scheme: light dark;
+    font-family: system-ui;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+}
+
+.hidden {
+    display: none;
+}
+
+#controls {
+    user-select: none;
+}
+
+/*noinspection ALL*/
+@media (display-mode: picture-in-picture) {
+    #popout {
+        display: none;
+    }
 }

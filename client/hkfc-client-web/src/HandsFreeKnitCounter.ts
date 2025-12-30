@@ -3,6 +3,18 @@ const CHARACTERISTIC_ROW_STITCH = "13be5c7d-bc86-43a4-8a54-f7ff294389fb"
 const DEVICE_NAME = "Hands-Free Knit Counter";
 const HISTORY_MAX = 100;
 
+function unpack(value: DataView): number[] {
+    return [value.getInt16(0, true), value.getInt16(2, true)];
+}
+
+function pack([row, stitch]: number[]): ArrayBuffer {
+    const buf = new ArrayBuffer(4);
+    const view = new DataView(buf);
+    view.setInt16(0, row, true);
+    view.setInt16(2, stitch, true);
+    return buf;
+}
+
 export class HandsFreeKnitCounter implements EventTarget {
     private device: BluetoothDevice | undefined;
     private service: BluetoothRemoteGATTService | undefined;
@@ -56,35 +68,22 @@ export class HandsFreeKnitCounter implements EventTarget {
     }
 
     public async resetCount() {
-        const zeroCount = new ArrayBuffer(4);
-        await this.countCharacteristic?.writeValue(zeroCount);
+        await this.countCharacteristic?.writeValue(pack([0, 0]));
     }
 
     public async resetRow() {
-        const value = new ArrayBuffer(4);
-        new DataView(value).setInt16(0, this._rowCount, true);
-        await this.countCharacteristic?.writeValue(value);
+        await this.countCharacteristic?.writeValue(pack([this._rowCount, 0]));
     }
 
     public async undo() {
-        // front of history has current one so pop two (pairs of two) off
-        if (this.history.length < 4) {
-            return false;
-        }
+        // front of history should be the current value, so pop two (pairs) off
         const [, , row, stitch] = this.history.splice(0, 4);
-        // const [row, stitch] = [this.history.shift(), this.history.shift()];
         if (row !== undefined && stitch !== undefined) {
-            const value = new ArrayBuffer(4);
-            const view = new DataView(value);
-            view.setInt16(0, row, true);
-            view.setInt16(2, stitch, true);
-            await this.countCharacteristic?.writeValue(value);
+            await this.countCharacteristic?.writeValue(pack([row, stitch]));
+        } else if (this._stitchCount > 0) {
+            // in absence of history we can just undo to the beginning of the row
+            await this.countCharacteristic?.writeValue(pack([this._rowCount, this._stitchCount - 1]));
         }
-        return true;
-    }
-
-    private unpackCombinedCount(value: DataView) {
-        return [value.getInt16(0, true), value.getInt16(2, true)];
     }
 
     private appendToHistory(arr: number[]) {
@@ -104,7 +103,7 @@ export class HandsFreeKnitCounter implements EventTarget {
         if (!this.countCharacteristic) {
             throw new Error("Not initialized");
         }
-        [this._rowCount, this._stitchCount] = this.unpackCombinedCount(await this.countCharacteristic.readValue());
+        [this._rowCount, this._stitchCount] = unpack(await this.countCharacteristic.readValue());
         this.dispatchUpdate();
     }
 
@@ -119,17 +118,12 @@ export class HandsFreeKnitCounter implements EventTarget {
 
     private onCharacteristicValueChanged(event: Event) {
         const target = event.target as BluetoothRemoteGATTCharacteristic;
-        if (!target || !target.value) return;
-        switch (target.uuid) {
-            case CHARACTERISTIC_ROW_STITCH:
-                const val = this.unpackCombinedCount(target.value);
-                this.appendToHistory(val);
-                [this._rowCount, this._stitchCount] = val;
-                this.dispatchUpdate();
-                break;
-            default:
-                throw new Error("Unrecognized uuid");
+        if (!target || !target.value || target.uuid !== CHARACTERISTIC_ROW_STITCH) {
+            console.log("skipping update", event);
+            return;
         }
+        [this._rowCount, this._stitchCount] = this.appendToHistory(unpack(target.value));
+        this.dispatchUpdate();
     }
 
     disconnect() {
@@ -148,11 +142,11 @@ export class HandsFreeKnitCounter implements EventTarget {
     }
 
     dispatchEvent(event: Event): boolean {
-        this.eventMap.get(event.type)?.forEach(x => {
-            if ('handleEvent' in x) {
-                x.handleEvent(event);
-            } else {
-                x(event);
+        this.eventMap.get(event.type)?.forEach(listener => {
+            if ('handleEvent' in listener) {
+                listener.handleEvent(event);
+            } else if (typeof listener === 'function') {
+                listener(event);
             }
         });
         return true;
