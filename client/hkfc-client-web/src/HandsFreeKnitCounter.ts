@@ -26,7 +26,7 @@ export class HandsFreeKnitCounter implements EventTarget {
         });
     }
 
-    async pair() {
+    public async pair() {
         this.device = await navigator.bluetooth.requestDevice({
             filters: [{name: DEVICE_NAME}],
             optionalServices: [SERVICE_HKFC],
@@ -37,7 +37,7 @@ export class HandsFreeKnitCounter implements EventTarget {
         this.device.addEventListener('gattserverdisconnected', this.onDisconnected);
     }
 
-    async connect() {
+    public async connect() {
         if (!this.device || !this.device.gatt) {
             throw new Error("Device not found, try pairing");
         }
@@ -52,12 +52,17 @@ export class HandsFreeKnitCounter implements EventTarget {
         await this.readCount();
     }
 
+    public async resetCount() {
+        const zeroCount = new Uint16Array(2);
+        this.countCharacteristic?.writeValue(zeroCount);
+    }
+
     private unpackCombinedCount(value:DataView) {
         this._rowCount = value.getInt16(0, true);
         this._stitchCount = value.getInt16(2, true);
     }
 
-    async readCount() {
+    private async readCount() {
         if (!this.countCharacteristic) {
             throw new Error("Not initialized");
         }
@@ -91,12 +96,11 @@ export class HandsFreeKnitCounter implements EventTarget {
         // await this.countCharacteristic?.stopNotifications();
         // this.countCharacteristic?.removeEventListener('characteristicvaluechanged', this.onCharacteristicValueChanged);
         this.device?.gatt?.disconnect();
+        this.device = undefined;
     }
 
-    onDisconnected() {
+    private onDisconnected() {
         console.log('Device disconnected.');
-        this.device?.gatt?.disconnect();
-        this.device = undefined;
     }
 
     addEventListener(type: string, callback: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void {

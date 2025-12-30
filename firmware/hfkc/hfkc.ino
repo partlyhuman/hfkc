@@ -62,12 +62,20 @@ BLEDescriptor *userDescription(const char *str) {
   return desc;
 }
 
-class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer *_server) override {
-    log_i("Client connected");
+class CountCharacteristicCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
+    BLECharacteristicCallbacks::onWrite(c); // super
+    count = *(CombinedCount*)(c->getData());
+    // CombinedCount *value = (CombinedCount*)(c->getData());
+    // count.row = value->row;
+    // count.stitch = value->stitch;
+    updateAll();
   }
-  void onDisconnect(BLEServer *_server) override {
-    log_i("BT: disconnect, restarting advertising");
+};
+
+class ServerCallbacks : public BLEServerCallbacks {
+  void onDisconnect(BLEServer *s) override {
+    BLEServerCallbacks::onDisconnect(s); // super
     BLEDevice::startAdvertising();
   }
 };
@@ -105,6 +113,7 @@ void setup() {
     CHARACTERISTIC_ROW_STITCH,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
   countCharacteristic->addDescriptor(userDescription("Stitch Count"));
+  countCharacteristic->setCallbacks(new CountCharacteristicCallbacks());
   service->start();
 
   BLEAdvertising *advertising = BLEDevice::getAdvertising();

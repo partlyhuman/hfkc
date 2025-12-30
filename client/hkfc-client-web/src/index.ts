@@ -8,12 +8,15 @@ window['hfkc'] = server;
 
 $('#connect').addEventListener('click', async () => {
     await server.pair();
-    console.log('requested');
     server.addEventListener('update', (e) => {
         const {rowCount, stitchCount} = (e as CustomEvent).detail;
+        // or server.rowCount; server.stitchCount;
         $('#row-count').innerHTML = rowCount.toString();
         $('#stitch-count').innerHTML = stitchCount.toString();
     });
     await server.connect();
-    console.log('connected');
+});
+
+$('#reset').addEventListener('click', async () => {
+    await server.resetCount();
 });
