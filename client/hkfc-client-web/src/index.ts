@@ -17,6 +17,6 @@ $('#connect').addEventListener('click', async () => {
     await server.connect();
 });
 
-$('#reset').addEventListener('click', async () => {
-    await server.resetCount();
-});
+$('#reset').addEventListener('click', () => server.resetCount());
+$('#undo').addEventListener('click', () => server.undo());
+$('#reset-row').addEventListener('click', () => server.resetRow());

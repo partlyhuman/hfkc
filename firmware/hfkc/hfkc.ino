@@ -112,7 +112,7 @@ void setup() {
   countCharacteristic = service->createCharacteristic(
     CHARACTERISTIC_ROW_STITCH,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
-  countCharacteristic->addDescriptor(userDescription("Stitch Count"));
+  countCharacteristic->addDescriptor(userDescription("Row/Stitch Count"));
   countCharacteristic->setCallbacks(new CountCharacteristicCallbacks());
   service->start();
 

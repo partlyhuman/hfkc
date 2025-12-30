@@ -1,18 +1,21 @@
 const SERVICE_HKFC = "49feaff1-039c-4702-b544-6d50dde1e1a1"
 const CHARACTERISTIC_ROW_STITCH = "13be5c7d-bc86-43a4-8a54-f7ff294389fb"
 const DEVICE_NAME = "Hands-Free Knit Counter";
+const HISTORY_MAX = 100;
 
 export class HandsFreeKnitCounter implements EventTarget {
     private device: BluetoothDevice | undefined;
     private service: BluetoothRemoteGATTService | undefined;
     private countCharacteristic: BluetoothRemoteGATTCharacteristic | undefined;
     private eventMap: Map<string, Set<EventListenerOrEventListenerObject>> = new Map();
+    private history: number[] = [];
 
     private _stitchCount = 0;
-    private _rowCount = 0;
     public get stitchCount() {
         return this._stitchCount;
     }
+
+    private _rowCount = 0;
     public get rowCount() {
         return this._rowCount;
     }
@@ -53,20 +56,55 @@ export class HandsFreeKnitCounter implements EventTarget {
     }
 
     public async resetCount() {
-        const zeroCount = new Uint16Array(2);
-        this.countCharacteristic?.writeValue(zeroCount);
+        const zeroCount = new ArrayBuffer(4);
+        await this.countCharacteristic?.writeValue(zeroCount);
     }
 
-    private unpackCombinedCount(value:DataView) {
-        this._rowCount = value.getInt16(0, true);
-        this._stitchCount = value.getInt16(2, true);
+    public async resetRow() {
+        const value = new ArrayBuffer(4);
+        new DataView(value).setInt16(0, this._rowCount, true);
+        await this.countCharacteristic?.writeValue(value);
+    }
+
+    public async undo() {
+        // front of history has current one so pop two (pairs of two) off
+        if (this.history.length < 4) {
+            return false;
+        }
+        const [, , row, stitch] = this.history.splice(0, 4);
+        // const [row, stitch] = [this.history.shift(), this.history.shift()];
+        if (row !== undefined && stitch !== undefined) {
+            const value = new ArrayBuffer(4);
+            const view = new DataView(value);
+            view.setInt16(0, row, true);
+            view.setInt16(2, stitch, true);
+            await this.countCharacteristic?.writeValue(value);
+        }
+        return true;
+    }
+
+    private unpackCombinedCount(value: DataView) {
+        return [value.getInt16(0, true), value.getInt16(2, true)];
+    }
+
+    private appendToHistory(arr: number[]) {
+        if (this.history.length >= arr.length && arr.every((value, i) => value === this.history[i])) {
+            // duplicate, do nothing
+            // console.debug(arr, "Already current in history");
+        } else {
+            if (this.history.unshift(...arr) > HISTORY_MAX) {
+                this.history.splice(HISTORY_MAX, this.history.length - HISTORY_MAX);
+            }
+        }
+        // console.debug(this.history);
+        return arr;
     }
 
     private async readCount() {
         if (!this.countCharacteristic) {
             throw new Error("Not initialized");
         }
-        this.unpackCombinedCount(await this.countCharacteristic.readValue());
+        [this._rowCount, this._stitchCount] = this.unpackCombinedCount(await this.countCharacteristic.readValue());
         this.dispatchUpdate();
     }
 
@@ -84,7 +122,9 @@ export class HandsFreeKnitCounter implements EventTarget {
         if (!target || !target.value) return;
         switch (target.uuid) {
             case CHARACTERISTIC_ROW_STITCH:
-                this.unpackCombinedCount(target.value);
+                const val = this.unpackCombinedCount(target.value);
+                this.appendToHistory(val);
+                [this._rowCount, this._stitchCount] = val;
                 this.dispatchUpdate();
                 break;
             default:
