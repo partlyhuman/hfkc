@@ -76,13 +76,11 @@ export class BleController {
   }
 
   public async resetCount() {
-    console.log(this.device);
     await this.device?.writeCharacteristicWithResponseForService(
       SERVICE_HKFC,
       CHARACTERISTIC_ROW_STITCH,
       toBase64(pack([0, 0])),
     );
-    console.log("done");
   }
 
   public async resetRow() {

@@ -2,7 +2,7 @@ import { useCallback, useRef, useSyncExternalStore } from "react";
 import { BleController } from "./BleController";
 
 export function useCountCharacteristic() {
-  const count = useRef([0, 0]);
+  const count = useRef([NaN, NaN]);
 
   const subscribe = useCallback((onStoreChange: () => void) => {
     const sub = BleController.instance.eventEmitter.addListener(

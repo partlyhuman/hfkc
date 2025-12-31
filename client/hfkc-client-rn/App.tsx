@@ -1,4 +1,3 @@
-import { StatusBar } from "expo-status-bar";
 import { Alert, Button, StyleSheet, Text, View } from "react-native";
 import { useEffect } from "react";
 import { BleController } from "./BleController";
@@ -6,6 +5,7 @@ import { useCountCharacteristic } from "./useCountCharacteristic";
 
 export default function App() {
   const [rowCount, stitchCount] = useCountCharacteristic();
+  const connected = !Number.isNaN(stitchCount);
 
   // Wait for bluetooth to be available. Probably need to ask permissions too.
   useEffect(() => {
@@ -39,9 +39,16 @@ export default function App() {
     );
   }
 
+  if (!connected) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.text}>Connecting...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <StatusBar style="auto" />
       <Text style={[styles.text, styles.rowCount]}>Row {rowCount}</Text>
       <Text style={[styles.text, styles.stitchCount]}>
         Stitch {stitchCount}
@@ -49,8 +56,7 @@ export default function App() {
       <View style={{ height: 50 }} />
       <Button title={"Undo"} />
       <Button
-        title={"Start Over Row"}
-        color={"red"}
+        title={"Restart Row"}
         onPress={() => BleController.instance.resetRow()}
       />
       <Button title={"Reset"} color={"red"} onPress={onResetPressed} />
