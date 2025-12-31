@@ -1,4 +1,4 @@
-export function parseBase64(base64: string): ArrayBuffer {
+export function fromBase64(base64: string): ArrayBuffer {
   const binary = atob(base64);
   const len = binary.length;
   const bytes = new Uint8Array(len);
@@ -6,6 +6,11 @@ export function parseBase64(base64: string): ArrayBuffer {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes.buffer;
+}
+
+export function toBase64(data: ArrayBuffer): string {
+  const arr = new Uint8Array(data);
+  return btoa(String.fromCharCode(...arr));
 }
 
 export function unpack(value: DataView): number[] {

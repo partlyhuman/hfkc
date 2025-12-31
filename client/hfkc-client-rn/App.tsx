@@ -1,16 +1,16 @@
 import { StatusBar } from "expo-status-bar";
-import { StyleSheet, Text, View } from "react-native";
+import { Alert, Button, StyleSheet, Text, View } from "react-native";
 import { useEffect } from "react";
 import { BleController } from "./BleController";
 import { useCountCharacteristic } from "./useCountCharacteristic";
 
 export default function App() {
+  const [rowCount, stitchCount] = useCountCharacteristic();
+
   // Wait for bluetooth to be available. Probably need to ask permissions too.
   useEffect(() => {
     const sub = BleController.instance.manager.onStateChange((state) => {
-      console.log("bt", state);
       if (state === "PoweredOn") {
-        console.log("powered on");
         sub.remove();
         BleController.instance.scanAndConnect().then();
       }
@@ -21,7 +21,23 @@ export default function App() {
     };
   }, []);
 
-  const [rowCount, stitchCount] = useCountCharacteristic();
+  function onResetPressed() {
+    Alert.alert(
+      "Reset?",
+      "Resetting will clear the counter all the way back to zero. Are you sure?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: () => BleController.instance.resetCount(),
+        },
+      ],
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -30,6 +46,14 @@ export default function App() {
       <Text style={[styles.text, styles.stitchCount]}>
         Stitch {stitchCount}
       </Text>
+      <View style={{ height: 50 }} />
+      <Button title={"Undo"} />
+      <Button
+        title={"Start Over Row"}
+        color={"red"}
+        onPress={() => BleController.instance.resetRow()}
+      />
+      <Button title={"Reset"} color={"red"} onPress={onResetPressed} />
     </View>
   );
 }
@@ -42,7 +66,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   text: {
-    fontSize: 20,
+    fontSize: 40,
   },
   rowCount: {},
   stitchCount: {},

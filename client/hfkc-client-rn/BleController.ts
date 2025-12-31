@@ -6,7 +6,7 @@ import {
   Subscription,
 } from "react-native-ble-plx";
 import { EventEmitter } from "expo";
-import { parseBase64, pack, unpack } from "./binaryUtils";
+import { fromBase64, pack, toBase64, unpack } from "./binaryUtils";
 
 const SERVICE_HKFC = "49feaff1-039c-4702-b544-6d50dde1e1a1";
 const CHARACTERISTIC_ROW_STITCH = "13be5c7d-bc86-43a4-8a54-f7ff294389fb";
@@ -24,8 +24,9 @@ export class BleController {
 
   private device: Device | undefined;
   private subscription: Subscription | undefined;
+  private counts: number[] = [];
 
-  async scanAndConnect() {
+  public async scanAndConnect() {
     console.log("scanning...");
     await this.manager.startDeviceScan(
       [SERVICE_HKFC],
@@ -69,11 +70,30 @@ export class BleController {
     }
 
     console.log(characteristic.value);
-    const value = parseBase64(characteristic.value);
-    this.eventEmitter.emit("countUpdate", unpack(new DataView(value)));
+    const value = fromBase64(characteristic.value);
+    this.counts = unpack(new DataView(value));
+    this.eventEmitter.emit("countUpdate", this.counts);
   }
 
-  async disconnect() {
+  public async resetCount() {
+    console.log(this.device);
+    await this.device?.writeCharacteristicWithResponseForService(
+      SERVICE_HKFC,
+      CHARACTERISTIC_ROW_STITCH,
+      toBase64(pack([0, 0])),
+    );
+    console.log("done");
+  }
+
+  public async resetRow() {
+    await this.device?.writeCharacteristicWithResponseForService(
+      SERVICE_HKFC,
+      CHARACTERISTIC_ROW_STITCH,
+      toBase64(pack([this.counts[0], 0])),
+    );
+  }
+
+  public async disconnect() {
     console.log("disconnecting...");
     this.subscription?.remove();
     this.device?.cancelConnection().then();
