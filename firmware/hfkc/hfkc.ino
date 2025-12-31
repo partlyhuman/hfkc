@@ -15,9 +15,10 @@ static BLEUUID CHARACTERISTIC_USER_DESCRIPTION((uint16_t)0x2901);
 static BLECharacteristic *countCharacteristic;
 static BLECharacteristic *modeCharacteristic;
 
-enum Mode : uint8_t {
-  MODE_COUNT_ROW_STITCH = 0,
-  MODE_COUNT_ROW = 1,
+enum Mode : uint16_t {
+  // Starting at 0 yields degenerate base64 values
+  MODE_COUNT_ROW_STITCH = 1,
+  MODE_COUNT_ROW = 2,
 };
 Mode mode;
 
@@ -87,6 +88,8 @@ class ModeCharacteristicCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) override {
     BLECharacteristicCallbacks::onWrite(c);  // super
     mode = *(Mode *)(c->getData());
+    log_i("Set mode %d", mode);
+    
     // This is the only place mode gets updated so save it manually
     prefsUpdateMode();
     // probably best to reset too
@@ -133,13 +136,6 @@ void setup() {
   // Default pin 8 overlaps with LED pin, use custom pins
   displaySetup();
 
-  // Restore last count & mode from EEPROM
-  prefsSetup();
-  if (bootedWithButtonPressed) {
-    // Reset
-    count = {};
-  }
-
   BLEDevice::init("Hands-Free Knit Counter");
 
   BLEServer *server = BLEDevice::createServer();
@@ -158,6 +154,13 @@ void setup() {
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
   modeCharacteristic->addDescriptor(userDescription("Mode"));
   modeCharacteristic->setCallbacks(new ModeCharacteristicCallbacks());
+
+  // Restore last count & mode from EEPROM
+  prefsSetup();
+  if (bootedWithButtonPressed) {
+    // Reset
+    count = {};
+  }
 
   service->start();
 

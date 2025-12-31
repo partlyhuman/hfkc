@@ -7,7 +7,7 @@ void prefsUpdateCount() {
 }
 
 void prefsUpdateMode() {
-  prefs.putUChar("mode", mode);
+  prefs.putUShort("mode", mode);
 }
 
 void prefsSetup() {
@@ -17,9 +17,14 @@ void prefsSetup() {
     return;
   }
   // Read initial state from prefs
-  // when uninitialized looks like this logs an error and does nothing
+  // when uninitialized, default values are set
+
   prefs.getBytes("count", &count, sizeof(CombinedCount));
-  mode = (Mode)prefs.getUChar("mode", (uint8_t)MODE_COUNT_ROW_STITCH);
+  countCharacteristic->setValue((uint8_t *)&count, sizeof(CombinedCount));
+
+  mode = (Mode)prefs.getUShort("mode", (uint16_t)MODE_COUNT_ROW_STITCH);
+  modeCharacteristic->setValue((uint16_t)mode);
+
   // Possibly wrap everything with begin/end
   // prefs.end();
 }

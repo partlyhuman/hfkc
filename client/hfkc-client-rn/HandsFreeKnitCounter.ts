@@ -9,8 +9,8 @@ const CHARACTERISTIC_ROW_STITCH = "13be5c7d-bc86-43a4-8a54-f7ff294389fb";
 const CHARACTERISTIC_MODE = "5a3b0882-fde0-45f5-9f41-58ab846c0132";
 
 export enum Mode {
-  MODE_COUNT_ROW_STITCH = 0,
-  MODE_COUNT_ROW = 1,
+  MODE_COUNT_ROW_STITCH = 1,
+  MODE_COUNT_ROW = 2,
 }
 
 export type ConnectionState = undefined | "bluetoothDisabled" | "disconnected" | "connected";
@@ -58,30 +58,25 @@ export class HandsFreeKnitCounter {
   }
 
   private async subscribeToHardwareStates() {
-    let currentBluetoothState: State | undefined;
+    // TODO perhaps these should be combined, and the state should be richer, split into multiple states, or simply expose both states as-is
+    //  also perhaps BT state should be re-queried at foreground? No - seems to do this already
+    let lastBluetoothState: State | undefined;
     this.manager.onStateChange((state) => {
-      console.log("BT state", currentBluetoothState, "->", state);
-      if (state === currentBluetoothState) {
-        return;
-      } else {
-        currentBluetoothState = state;
-      }
+      console.log("BT state", lastBluetoothState, "->", state);
+      if (state === lastBluetoothState) return;
       if (state === "PoweredOn") {
         this.events.emit("connectionStateChanged", "disconnected");
         this.scanAndConnect().then();
       } else {
         this.events.emit("connectionStateChanged", "bluetoothDisabled");
       }
+      lastBluetoothState = state;
     }, true);
-    let currentAppState: AppStateStatus | undefined;
+    let lastAppState: AppStateStatus | undefined;
     AppState.addEventListener("change", (appState) => {
-      console.log("app state", currentAppState, "->", appState);
-      if (appState === currentAppState) {
-        return;
-      } else {
-        currentAppState = appState;
-      }
-      if (appState === "active") {
+      console.log("app state", lastAppState, "->", appState);
+      if (appState === lastAppState) return;
+      if (lastAppState === "background" && appState === "active") {
         if (this.connectionState === "connected") {
           console.log("connected - refetching on foreground");
           this.readCount().then();
@@ -90,6 +85,7 @@ export class HandsFreeKnitCounter {
           this.scanAndConnect().then();
         }
       }
+      lastAppState = appState;
     });
   }
 
@@ -100,10 +96,9 @@ export class HandsFreeKnitCounter {
     }
     if (Platform.OS === "android" && PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION) {
       const apiLevel = parseInt(Platform.Version.toString(), 10);
-
       if (apiLevel < 31) {
-        const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
-        return granted === PermissionsAndroid.RESULTS.GRANTED;
+        const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+        return result === PermissionsAndroid.RESULTS.GRANTED;
       }
       if (PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN && PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT) {
         const result = await PermissionsAndroid.requestMultiple([
@@ -111,12 +106,7 @@ export class HandsFreeKnitCounter {
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
         ]);
-
-        return (
-          result["android.permission.BLUETOOTH_CONNECT"] === PermissionsAndroid.RESULTS.GRANTED &&
-          result["android.permission.BLUETOOTH_SCAN"] === PermissionsAndroid.RESULTS.GRANTED &&
-          result["android.permission.ACCESS_FINE_LOCATION"] === PermissionsAndroid.RESULTS.GRANTED
-        );
+        return Object.values(result).every((v) => v === PermissionsAndroid.RESULTS.GRANTED);
       }
     }
     return false;
@@ -146,14 +136,15 @@ export class HandsFreeKnitCounter {
     console.log("connecting...");
     this.device = await device.connect();
     this.subscriptions.push(this.device.onDisconnected(this.onDisconnected));
-    await this.device.discoverAllServicesAndCharacteristics(); // necessary?
+    // this is necessary even if we think we know everything by ID
+    await this.device.discoverAllServicesAndCharacteristics();
     this.subscriptions.push(
       this.device.monitorCharacteristicForService(SERVICE_HKFC, CHARACTERISTIC_ROW_STITCH, this.onCharacteristicUpdate),
     );
     // Read current count & mode once at startup
-    await Promise.all([this.readMode(), this.readCount()]);
-    console.log("connected");
+    await Promise.allSettled([this.readMode(), this.readCount()]);
     this.events.emit("connectionStateChanged", "connected");
+    console.log("connected!");
   }
 
   private onCharacteristicUpdate(error: BleError | null, characteristic: Characteristic | null): void {
@@ -162,17 +153,26 @@ export class HandsFreeKnitCounter {
       return;
     }
 
-    console.log(characteristic.value);
-    const value = fromBase64(characteristic.value);
-    this.counts = unpackCounts(new DataView(value));
-    this.events.emit("countUpdate", this.counts);
+    switch (characteristic.uuid) {
+      case CHARACTERISTIC_ROW_STITCH: {
+        console.log("Updated counts: ", characteristic.value);
+        const value = fromBase64(characteristic.value);
+        this.counts = unpackCounts(new DataView(value));
+        this.events.emit("countUpdate", this.counts);
+        break;
+      }
+      case CHARACTERISTIC_MODE: {
+        console.log("Updated mode: ", characteristic.value);
+        const value = fromBase64(characteristic.value);
+        this._mode = unpackMode(new DataView(value));
+        this.events.emit("modeUpdate", this._mode);
+      }
+    }
   }
 
   public async readCount() {
     const c = await this.device?.readCharacteristicForService(SERVICE_HKFC, CHARACTERISTIC_ROW_STITCH);
-    if (c) {
-      this.onCharacteristicUpdate(null, c);
-    }
+    this.onCharacteristicUpdate(null, c ?? null);
   }
 
   public async resetCount() {
@@ -193,11 +193,7 @@ export class HandsFreeKnitCounter {
 
   public async readMode() {
     const c = await this.device?.readCharacteristicForService(SERVICE_HKFC, CHARACTERISTIC_MODE);
-    if (c?.value) {
-      const value = fromBase64(c.value);
-      this._mode = unpackMode(new DataView(value));
-      this.events.emit("modeUpdate", this._mode);
-    }
+    this.onCharacteristicUpdate(null, c ?? null);
   }
 
   public async setMode(newMode: Mode) {
@@ -213,14 +209,16 @@ export class HandsFreeKnitCounter {
     this.events.emit("modeUpdate", this._mode);
   }
 
-  private onDisconnected() {
+  private async onDisconnected() {
     console.log("disconnected...");
-    this.events.emit("connectionStateChanged", "disconnected");
     this.subscriptions.splice(0).map((s) => s.remove());
     this.device = undefined;
-    // reconnect automatically?
-    console.log("reconnecting...");
-    this.scanAndConnect().then();
+    // reconnect automatically, but only if BT is on - we could have cut off bt
+    if ((await this.manager.state()) === "PoweredOn") {
+      this.events.emit("connectionStateChanged", "disconnected");
+      console.log("reconnecting...");
+      this.scanAndConnect().then();
+    }
   }
 
   public async dispose() {

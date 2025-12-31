@@ -27,7 +27,7 @@ export default function App() {
     ]);
   }
 
-  if (connectionState === "disconnected") {
+  if (!connectionState || connectionState === "disconnected") {
     return (
       <View style={styles.container}>
         <Text style={styles.text}>Connecting...</Text>
@@ -47,6 +47,11 @@ export default function App() {
     );
   }
 
+  const modeSegments = [
+    { value: Mode.MODE_COUNT_ROW_STITCH, label: "Row & Stitch" },
+    { value: Mode.MODE_COUNT_ROW, label: "Row" },
+  ];
+
   if (connectionState === "connected") {
     return (
       <View style={styles.container}>
@@ -61,10 +66,11 @@ export default function App() {
         <Button title={"Reset"} color={"red"} onPress={onResetPressed} />
         <SegmentedControl
           style={styles.modeSegmentedControl}
-          values={["Row & Stitch", "Row"]}
-          selectedIndex={mode}
+          values={modeSegments.map((o) => o.label)}
+          selectedIndex={modeSegments.findIndex((o) => o.value === mode)}
           onChange={(event) => {
-            const newMode = event.nativeEvent.selectedSegmentIndex as Mode;
+            const index = event.nativeEvent.selectedSegmentIndex;
+            const newMode = modeSegments[index].value;
             hfkc.setMode(newMode).then();
           }}
         />
