@@ -17,9 +17,11 @@ void displayUpdate() {
   display.setCursor(0, 0);
   display.println(string);
 
-  sprintf(string, "Stitch %d", count.stitch);
-  display.setCursor(64, 0);
-  display.println(string);
+  if (mode == MODE_COUNT_ROW_STITCH) {
+    sprintf(string, "Stitch %d", count.stitch);
+    display.setCursor(64, 0);
+    display.println(string);
+  }
 
   display.display();
 }

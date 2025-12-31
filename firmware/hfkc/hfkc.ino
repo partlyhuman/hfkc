@@ -10,8 +10,16 @@ static AceButton button(BUTTON_PIN);
 
 static BLEUUID SERVICE_HKFC("49feaff1-039c-4702-b544-6d50dde1e1a1");
 static BLEUUID CHARACTERISTIC_ROW_STITCH("13be5c7d-bc86-43a4-8a54-f7ff294389fb");
+static BLEUUID CHARACTERISTIC_MODE("5a3b0882-fde0-45f5-9f41-58ab846c0132");
 static BLEUUID CHARACTERISTIC_USER_DESCRIPTION((uint16_t)0x2901);
 static BLECharacteristic *countCharacteristic;
+static BLECharacteristic *modeCharacteristic;
+
+enum Mode : uint8_t {
+  MODE_COUNT_ROW_STITCH = 0,
+  MODE_COUNT_ROW = 1,
+};
+Mode mode;
 
 typedef struct _CombinedCount {
   uint16_t row;
@@ -28,12 +36,15 @@ void flashLED(int count = 1, int dur = 150) {
   }
 }
 
-void updateAll() {
+void countCharacteristicUpdate() {
   countCharacteristic->setValue((uint8_t *)&count, sizeof(CombinedCount));
   countCharacteristic->notify();
+}
 
+void updateAll() {
+  countCharacteristicUpdate();
   displayUpdate();
-  prefsUpdate();
+  prefsUpdateCount();
 }
 
 void handleButtonEvent(AceButton *_button, uint8_t eventType, uint8_t buttonState) {
@@ -45,12 +56,21 @@ void handleButtonEvent(AceButton *_button, uint8_t eventType, uint8_t buttonStat
       digitalWrite(LED_BUILTIN, HIGH);
       break;
     case AceButton::kEventClicked:
-      count.stitch++;
+      if (mode == MODE_COUNT_ROW_STITCH) {
+        count.stitch++;
+      } else if (mode == MODE_COUNT_ROW) {
+        count.row++;
+      }
       updateAll();
       break;
     case AceButton::kEventLongPressed:
-      count.stitch = 0;
-      count.row++;
+      if (mode == MODE_COUNT_ROW_STITCH) {
+        count.stitch = 0;
+        count.row++;
+      } else if (mode == MODE_COUNT_ROW) {
+        // do the same as a short press
+        count.row++;
+      }
       updateAll();
       break;
   }
@@ -62,10 +82,23 @@ BLEDescriptor *userDescription(const char *str) {
   return desc;
 }
 
+// Could combine callback classes and check UUID but this is more flexible
+class ModeCharacteristicCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
+    BLECharacteristicCallbacks::onWrite(c);  // super
+    mode = *(Mode *)(c->getData());
+    // This is the only place mode gets updated so save it manually
+    prefsUpdateMode();
+    // probably best to reset too
+    count = {};
+    updateAll();
+  }
+};
+
 class CountCharacteristicCallbacks : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) override {
-    BLECharacteristicCallbacks::onWrite(c); // super
-    count = *(CombinedCount*)(c->getData());
+    BLECharacteristicCallbacks::onWrite(c);  // super
+    count = *(CombinedCount *)(c->getData());
     // CombinedCount *value = (CombinedCount*)(c->getData());
     // count.row = value->row;
     // count.stitch = value->stitch;
@@ -75,7 +108,7 @@ class CountCharacteristicCallbacks : public BLECharacteristicCallbacks {
 
 class ServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer *s) override {
-    BLEServerCallbacks::onDisconnect(s); // super
+    BLEServerCallbacks::onDisconnect(s);  // super
     BLEDevice::startAdvertising();
   }
 };
@@ -100,8 +133,12 @@ void setup() {
   // Default pin 8 overlaps with LED pin, use custom pins
   displaySetup();
 
-  // Restore from EEPROM - or reset when booted with button depressed
-  prefsSetup(!bootedWithButtonPressed);
+  // Restore last count & mode from EEPROM
+  prefsSetup();
+  if (bootedWithButtonPressed) {
+    // Reset
+    count = {};
+  }
 
   BLEDevice::init("Hands-Free Knit Counter");
 
@@ -109,11 +146,19 @@ void setup() {
   server->setCallbacks(new ServerCallbacks());
 
   BLEService *service = server->createService(SERVICE_HKFC);
+
   countCharacteristic = service->createCharacteristic(
     CHARACTERISTIC_ROW_STITCH,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
   countCharacteristic->addDescriptor(userDescription("Row/Stitch Count"));
   countCharacteristic->setCallbacks(new CountCharacteristicCallbacks());
+
+  modeCharacteristic = service->createCharacteristic(
+    CHARACTERISTIC_MODE,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+  modeCharacteristic->addDescriptor(userDescription("Mode"));
+  modeCharacteristic->setCallbacks(new ModeCharacteristicCallbacks());
+
   service->start();
 
   BLEAdvertising *advertising = BLEDevice::getAdvertising();

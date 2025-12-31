@@ -6,25 +6,42 @@ import {
   Subscription,
 } from "react-native-ble-plx";
 import { EventEmitter } from "expo";
-import { fromBase64, pack, toBase64, unpack } from "./binaryUtils";
+import {
+  fromBase64,
+  packCounts,
+  packMode,
+  toBase64,
+  unpackCounts,
+  unpackMode,
+} from "./binaryUtils";
 
+const DEVICE_NAME = "Hands-Free Knit Counter";
 const SERVICE_HKFC = "49feaff1-039c-4702-b544-6d50dde1e1a1";
 const CHARACTERISTIC_ROW_STITCH = "13be5c7d-bc86-43a4-8a54-f7ff294389fb";
-const DEVICE_NAME = "Hands-Free Knit Counter";
+const CHARACTERISTIC_MODE = "5a3b0882-fde0-45f5-9f41-58ab846c0132";
 
-type BleControllerEvents = {
+export enum Mode {
+  MODE_COUNT_ROW_STITCH = 0,
+  MODE_COUNT_ROW = 1,
+}
+
+type EventMap = {
   countUpdate: (count: number[]) => void;
+  modeUpdate: (mode: Mode) => void;
 };
 
-export class BleController {
-  public static instance: BleController;
-
+export class HandsFreeKnitCounter {
   public readonly manager = new BleManager();
-  public readonly eventEmitter = new EventEmitter<BleControllerEvents>();
+  public readonly events = new EventEmitter<EventMap>();
 
   private device: Device | undefined;
   private subscription: Subscription | undefined;
   private counts: number[] = [];
+
+  private _mode: Mode = Mode.MODE_COUNT_ROW_STITCH;
+  public get mode() {
+    return this._mode;
+  }
 
   public async scanAndConnect() {
     console.log("scanning...");
@@ -52,12 +69,9 @@ export class BleController {
       CHARACTERISTIC_ROW_STITCH,
       this.onCharacteristicUpdate.bind(this),
     );
-    // Read current value once at startup
-    const c = await this.device.readCharacteristicForService(
-      SERVICE_HKFC,
-      CHARACTERISTIC_ROW_STITCH,
-    );
-    this.onCharacteristicUpdate(null, c);
+    // Read current count & mode once at startup
+    this.readCount().then();
+    this.readMode().then();
   }
 
   private onCharacteristicUpdate(
@@ -71,15 +85,25 @@ export class BleController {
 
     console.log(characteristic.value);
     const value = fromBase64(characteristic.value);
-    this.counts = unpack(new DataView(value));
-    this.eventEmitter.emit("countUpdate", this.counts);
+    this.counts = unpackCounts(new DataView(value));
+    this.events.emit("countUpdate", this.counts);
+  }
+
+  public async readCount() {
+    const c = await this.device?.readCharacteristicForService(
+      SERVICE_HKFC,
+      CHARACTERISTIC_ROW_STITCH,
+    );
+    if (c) {
+      this.onCharacteristicUpdate(null, c);
+    }
   }
 
   public async resetCount() {
     await this.device?.writeCharacteristicWithResponseForService(
       SERVICE_HKFC,
       CHARACTERISTIC_ROW_STITCH,
-      toBase64(pack([0, 0])),
+      toBase64(packCounts([0, 0])),
     );
   }
 
@@ -87,8 +111,33 @@ export class BleController {
     await this.device?.writeCharacteristicWithResponseForService(
       SERVICE_HKFC,
       CHARACTERISTIC_ROW_STITCH,
-      toBase64(pack([this.counts[0], 0])),
+      toBase64(packCounts([this.counts[0], 0])),
     );
+  }
+
+  public async readMode() {
+    const c = await this.device?.readCharacteristicForService(
+      SERVICE_HKFC,
+      CHARACTERISTIC_MODE,
+    );
+    if (c?.value) {
+      const value = fromBase64(c.value);
+      this._mode = unpackMode(new DataView(value));
+      this.events.emit("modeUpdate", this._mode);
+    }
+  }
+
+  public async setMode(newMode: Mode) {
+    if (newMode === this._mode) {
+      return;
+    }
+    this._mode = newMode;
+    await this.device?.writeCharacteristicWithResponseForService(
+      SERVICE_HKFC,
+      CHARACTERISTIC_MODE,
+      toBase64(packMode(newMode)),
+    );
+    this.events.emit("modeUpdate", this._mode);
   }
 
   public async disconnect() {
@@ -98,4 +147,4 @@ export class BleController {
   }
 }
 
-BleController.instance = new BleController();
+export const hfkc = new HandsFreeKnitCounter();

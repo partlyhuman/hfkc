@@ -2,22 +2,24 @@
 
 static Preferences prefs;
 
-void prefsUpdate() {
-  // prefs.begin("hfkc");
+void prefsUpdateCount() {
   prefs.putBytes("count", &count, sizeof(CombinedCount));
-  // prefs.putUShort(NV_ADDR_ROW, rowCount);
-  // prefs.putUShort(NV_ADDR_STITCH, stitchCount);
-  // prefs.end();
 }
 
-void prefsSetup(bool loadFromPrefs) {
+void prefsUpdateMode() {
+  prefs.putUChar("mode", mode);
+}
+
+void prefsSetup() {
   if (!prefs.begin("hfkc")) {
     log_e("prefs init fail");
     // flashLED(5);
     return;
   }
-  if (loadFromPrefs && prefs.isKey("count")) {
-    prefs.getBytes("count", &count, sizeof(CombinedCount));
-  }
+  // Read initial state from prefs
+  // when uninitialized looks like this logs an error and does nothing
+  prefs.getBytes("count", &count, sizeof(CombinedCount));
+  mode = (Mode)prefs.getUChar("mode", (uint8_t)MODE_COUNT_ROW_STITCH);
+  // Possibly wrap everything with begin/end
   // prefs.end();
 }
