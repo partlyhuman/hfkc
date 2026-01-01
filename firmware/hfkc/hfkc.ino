@@ -160,13 +160,26 @@ void setup() {
   buttonConfig->setFeature(ButtonConfig::kFeatureLongPress);
   buttonConfig->setEventHandler(handleButtonEvent);
 
-  sleepSetup();
   displaySetup();
   prefsSetup();
-  if (bootedWithButtonPressed) {
-    // Reset if booting with pedal held
-    count = {};
+  // Sleep setup after prefs setup so we can increment if waking from sleep by tap
+  if (sleepSetup()) {
+    // DISABLED - I'm not sure this is a good idea. I think you don't want to have to guess whether it just went up or not.
+    // If you've left it for like 15 minutes on end, you're going to glance at the counter before tapping and see it's asleep.
+    // If we try and increment when waking up, I feel like users will be in a guessing game.
+    
+    // log_i("Woke from sleep by GPIO - counting this as a button press and incrementing");
+    // flashLED(1);
+    // if (mode == MODE_COUNT_ROW_STITCH) {
+    //   count.stitch++;
+    // } else if (mode == MODE_COUNT_ROW) {
+    //   count.row++;
+    // }
   }
+  // else if (bootedWithButtonPressed) {
+  //   // Reset if booting with pedal held
+  //   count = {};
+  // }
 
   BLEDevice::init("Hands-Free Knit Counter");
 
