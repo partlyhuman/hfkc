@@ -26,7 +26,15 @@ void displayUpdate() {
   display.display();
 }
 
+void displayTeardown() {
+  display.clearDisplay();
+  display.display();
+  display.dim(true);
+  Wire.end();
+}
+
 void displaySetup() {
+  // Default pin 8 overlaps with LED pin, use custom pins
   Wire.setPins(1, 2);
   Wire.begin();
   // See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32

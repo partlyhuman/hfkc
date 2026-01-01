@@ -7,11 +7,13 @@ using namespace ace_button;
 
 const int BUTTON_PIN = 0;
 static AceButton button(BUTTON_PIN);
+unsigned long lastActivityMs = ULONG_MAX;
 
 static BLEUUID SERVICE_HKFC("49feaff1-039c-4702-b544-6d50dde1e1a1");
 static BLEUUID CHARACTERISTIC_ROW_STITCH("13be5c7d-bc86-43a4-8a54-f7ff294389fb");
 static BLEUUID CHARACTERISTIC_MODE("5a3b0882-fde0-45f5-9f41-58ab846c0132");
 static BLEUUID CHARACTERISTIC_USER_DESCRIPTION((uint16_t)0x2901);
+static BLEServer *server;
 static BLECharacteristic *countCharacteristic;
 static BLECharacteristic *modeCharacteristic;
 
@@ -27,6 +29,7 @@ typedef struct _CombinedCount {
   uint16_t stitch;
 } CombinedCount;
 CombinedCount count;
+
 
 void flashLED(int count = 1, int dur = 150) {
   for (int i = 0; i < count; i++) {
@@ -49,6 +52,7 @@ void updateAll() {
 }
 
 void handleButtonEvent(AceButton *_button, uint8_t eventType, uint8_t buttonState) {
+  lastActivityMs = millis();
   switch (eventType) {
     case AceButton::kEventPressed:
       digitalWrite(LED_BUILTIN, LOW);
@@ -89,7 +93,7 @@ class ModeCharacteristicCallbacks : public BLECharacteristicCallbacks {
     BLECharacteristicCallbacks::onWrite(c);  // super
     mode = *(Mode *)(c->getData());
     log_i("Set mode %d", mode);
-    
+
     // This is the only place mode gets updated so save it manually
     prefsUpdateMode();
     // probably best to reset too
@@ -116,6 +120,16 @@ class ServerCallbacks : public BLEServerCallbacks {
   }
 };
 
+bool btleIdle() {
+  return server->getConnectedCount() <= 0;
+}
+
+void btleTeardown() {
+  // service->stop();
+  BLEDevice::stopAdvertising();
+  BLEDevice::deinit(true);
+}
+
 void setup() {
   Serial.begin(115200);
   delay(100);
@@ -133,12 +147,17 @@ void setup() {
   buttonConfig->setFeature(ButtonConfig::kFeatureLongPress);
   buttonConfig->setEventHandler(handleButtonEvent);
 
-  // Default pin 8 overlaps with LED pin, use custom pins
+  sleepSetup();
   displaySetup();
+  prefsSetup();
+  if (bootedWithButtonPressed) {
+    // Reset if booting with pedal held
+    count = {};
+  }
 
   BLEDevice::init("Hands-Free Knit Counter");
 
-  BLEServer *server = BLEDevice::createServer();
+  server = BLEDevice::createServer();
   server->setCallbacks(new ServerCallbacks());
 
   BLEService *service = server->createService(SERVICE_HKFC);
@@ -148,19 +167,14 @@ void setup() {
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
   countCharacteristic->addDescriptor(userDescription("Row/Stitch Count"));
   countCharacteristic->setCallbacks(new CountCharacteristicCallbacks());
+  countCharacteristic->setValue((uint8_t *)&count, sizeof(CombinedCount));
 
   modeCharacteristic = service->createCharacteristic(
     CHARACTERISTIC_MODE,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
   modeCharacteristic->addDescriptor(userDescription("Mode"));
   modeCharacteristic->setCallbacks(new ModeCharacteristicCallbacks());
-
-  // Restore last count & mode from EEPROM
-  prefsSetup();
-  if (bootedWithButtonPressed) {
-    // Reset
-    count = {};
-  }
+  modeCharacteristic->setValue((uint16_t)mode);
 
   service->start();
 
@@ -173,9 +187,11 @@ void setup() {
   BLEDevice::startAdvertising();
 
   updateAll();
+  lastActivityMs = millis();
   log_i("Setup complete");
 }
 
 void loop() {
   button.check();
+  sleepUpdate();
 }
