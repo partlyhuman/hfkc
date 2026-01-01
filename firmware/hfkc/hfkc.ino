@@ -7,7 +7,7 @@ using namespace ace_button;
 
 const int BUTTON_PIN = 0;
 static AceButton button(BUTTON_PIN);
-unsigned long lastActivityMs = ULONG_MAX;
+unsigned long lastActivityMs;
 
 static BLEUUID SERVICE_HKFC("49feaff1-039c-4702-b544-6d50dde1e1a1");
 static BLEUUID CHARACTERISTIC_ROW_STITCH("13be5c7d-bc86-43a4-8a54-f7ff294389fb");
@@ -116,12 +116,25 @@ class CountCharacteristicCallbacks : public BLECharacteristicCallbacks {
 class ServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer *s) override {
     BLEServerCallbacks::onDisconnect(s);  // super
-    BLEDevice::startAdvertising();
+    if (s->getConnectedCount() == 0) {
+      log_d("All clients disconnected, going back to advertise");
+      lastActivityMs = millis();
+      BLEDevice::startAdvertising();
+    } else {
+      log_d("Disconnected but other clients are still connected");
+    }
+  }
+  void onConnect(BLEServer *s) override {
+    BLEServerCallbacks::onConnect(s);
+    lastActivityMs = millis();
   }
 };
 
-bool btleIdle() {
-  return server->getConnectedCount() <= 0;
+unsigned long idleFor() {
+  if (server->getConnectedCount() > 0 || lastActivityMs == 0) {
+    return 0;
+  }
+  return millis() - lastActivityMs;
 }
 
 void btleTeardown() {
@@ -186,8 +199,8 @@ void setup() {
   advertising->setMaxPreferred(0x12);
   BLEDevice::startAdvertising();
 
-  updateAll();
   lastActivityMs = millis();
+  updateAll();
   log_i("Setup complete");
 }
 
