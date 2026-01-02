@@ -27,7 +27,8 @@
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
         "android.permission.BLUETOOTH_CONNECT"
-      ]
+      ],
+      "package": "com.partlyhuman.hfkcclientrn"
     },
     "web": {
       "favicon": "./assets/favicon.png"

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ConnectionState, HandsFreeKnitCounter, Mode } from "./HandsFreeKnitCounter";
 import { useEventListener } from "expo";
 import SegmentedControl from "@react-native-segmented-control/segmented-control";
+import { useKeepAwake } from "expo-keep-awake";
 
 export default function App() {
   const hfkc = HandsFreeKnitCounter.instance;
@@ -12,6 +13,9 @@ export default function App() {
   useEventListener(hfkc.events, "modeUpdate", setMode);
   const [count, setCount] = useState<number[]>([]);
   useEventListener(hfkc.events, "countUpdate", setCount);
+
+  // Don't sleep while this screen is up - you're going to want to see the screen and the whole point is this is hands-free
+  useKeepAwake();
 
   function onResetPressed() {
     Alert.alert("Reset?", "Resetting will clear the counter all the way back to zero. Are you sure?", [
