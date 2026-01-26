@@ -18,25 +18,15 @@ void displayUpdate() {
   u8g2.clearBuffer();
   u8g2.setFontMode(1);
   u8g2.setBitmapMode(1);
-  // rect
-  u8g2.drawFrame(1, 12, 70, 27);
 
   // count
-  u8g2.setFont(u8g2_font_profont29_tr);
-  u8g2.setCursor(5, 35);
+  u8g2.setFont(u8g2_font_spleen32x64_mf);
+  u8g2.setCursor(0, 40);
   u8g2.print(mode == MODE_COUNT_ROW ? count.row : count.stitch);
-
-  // row_count
-  if (mode == MODE_COUNT_ROW_STITCH) {
-    u8g2.setFont(u8g2_font_6x13_tr);
-    u8g2.setCursor(1, 10);
-    u8g2.print("Row ");
-    u8g2.print(count.row);
-  }
 
   // connected
   if (connected) {
-    u8g2.drawXBM(63, 2, 7, 8, image_connected_bits);
+    u8g2.drawXBM(65, 0, 7, 8, image_connected_bits);
   }
 
   u8g2.sendBuffer();
