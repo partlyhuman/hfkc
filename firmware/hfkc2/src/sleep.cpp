@@ -22,10 +22,13 @@ bool sleepSetup() {
 }
 
 void sleepUpdate() {
-  if (idleFor() > SLEEP_AFTER_MS) {
-    log_i("No clients connected, no activity in %d, going to sleep",
-          SLEEP_AFTER_MS);
+  auto idle = idleFor();
+  if (idle > SLEEP_AFTER_MS) {
+    log_i("No clients connected, no activity in %d sec, going to sleep",
+          idle / 1000);
     Serial.flush();
+    delay(500);
+
     displayTeardown();
     btleTeardown();
     prefsTeardown();

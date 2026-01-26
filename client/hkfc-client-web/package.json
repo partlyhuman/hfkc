@@ -10,6 +10,7 @@
   "devDependencies": {
     "@types/web-bluetooth": "^0.0.21",
     "parcel": "^2.14.0",
+    "prettier": "^3.8.1",
     "typescript": "^5.9.3"
   },
   "browserslist": "Chrome >= 56, Edge >= 79, supports es6-module"

@@ -4,7 +4,7 @@
 #include "config.h"
 #include "main.h"
 
-U8G2_SSD1306_72X40_ER_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, 6, 5);
+U8G2_SSD1306_72X40_ER_F_HW_I2C u8g2(U8G2_R2, U8X8_PIN_NONE, 6, 5);
 
 void displaySetup() { u8g2.begin(); }
 
@@ -26,4 +26,8 @@ void displayUpdate() {
   u8g2.sendBuffer();
 }
 
-void displayTeardown() {}
+void displayTeardown() {
+  u8g2.clearDisplay();
+  u8g2.clearBuffer();
+  u8g2.sleepOn();
+}

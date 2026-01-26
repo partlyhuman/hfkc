@@ -1,6 +1,7 @@
 #include "main.h"
 
 #include <AceButton.h>
+#include <BLE2902.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -14,7 +15,7 @@
 using namespace ace_button;
 
 static AceButton button(BUTTON_PIN);
-unsigned long lastActivityMs;
+static unsigned long lastActivityMs;
 
 static BLEServer *server;
 static BLECharacteristic *countCharacteristic;
@@ -25,9 +26,9 @@ CombinedCount count;
 
 void flashLED(int count, int dur) {
   for (int i = 0; i < count; i++) {
-    digitalWrite(LED_BUILTIN, LED_ON);
+    digitalWrite(PIN_LED, LED_ON);
     delay(dur);
-    digitalWrite(LED_BUILTIN, LED_OFF);
+    digitalWrite(PIN_LED, LED_OFF);
     delay(dur);
   }
 }
@@ -48,10 +49,10 @@ void handleButtonEvent(AceButton *_button, uint8_t eventType,
   lastActivityMs = millis();
   switch (eventType) {
     case AceButton::kEventPressed:
-      digitalWrite(LED_BUILTIN, LOW);
+      digitalWrite(PIN_LED, LED_ON);
       break;
     case AceButton::kEventReleased:
-      digitalWrite(LED_BUILTIN, HIGH);
+      digitalWrite(PIN_LED, LED_OFF);
       break;
     case AceButton::kEventClicked:
       if (mode == MODE_COUNT_ROW_STITCH) {
@@ -109,16 +110,18 @@ class CountCharacteristicCallbacks : public BLECharacteristicCallbacks {
 class ServerCallbacks : public BLEServerCallbacks {
   void onDisconnect(BLEServer *s) override {
     BLEServerCallbacks::onDisconnect(s);  // super
-    if (s->getConnectedCount() == 0) {
+    auto connectedCount = s->getConnectedCount();
+    log_i("DISCONNECTED! OLD count=%d", connectedCount);
+    if (connectedCount <= 1) {
       log_d("All clients disconnected, going back to advertise");
       lastActivityMs = millis();
       BLEDevice::startAdvertising();
-    } else {
-      log_d("Disconnected but other clients are still connected");
     }
   }
   void onConnect(BLEServer *s) override {
     BLEServerCallbacks::onConnect(s);
+    auto connectedCount = s->getConnectedCount();
+    log_i("CONNECTED! OLD count=%d", connectedCount);
     lastActivityMs = millis();
   }
 };
@@ -140,8 +143,8 @@ void setup() {
   Serial.begin(115200);
   delay(100);
 
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LED_OFF);
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LED_OFF);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   bool bootedWithButtonPressed = digitalRead(BUTTON_PIN) == LOW;
 
@@ -187,6 +190,8 @@ void setup() {
       CHARACTERISTIC_ROW_STITCH, BLECharacteristic::PROPERTY_READ |
                                      BLECharacteristic::PROPERTY_WRITE |
                                      BLECharacteristic::PROPERTY_NOTIFY);
+  // Notify does not work without the addition of this descriptor!
+  countCharacteristic->addDescriptor(new BLE2902());
   countCharacteristic->addDescriptor(userDescription("Row/Stitch Count"));
   countCharacteristic->setCallbacks(new CountCharacteristicCallbacks());
   countCharacteristic->setValue((uint8_t *)&count, sizeof(CombinedCount));

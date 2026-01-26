@@ -1,8 +1,9 @@
 #pragma once
 #include <BLEUtils.h>
 
-#define LED_OFF LOW
-#define LED_ON HIGH
+#define PIN_LED 8
+#define LED_OFF HIGH
+#define LED_ON LOW
 
 const int BUTTON_PIN = 1;
 

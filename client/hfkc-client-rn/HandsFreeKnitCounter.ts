@@ -119,7 +119,7 @@ export class HandsFreeKnitCounter {
     }
 
     console.log("scanning....");
-    await this.manager.startDeviceScan([SERVICE_HKFC], null, async (error, device) => {
+    await this.manager.startDeviceScan([SERVICE_HKFC], null, async (error: BleError | null, device) => {
       console.log("found", device);
       if (error || !device) {
         console.error(error);
@@ -133,16 +133,18 @@ export class HandsFreeKnitCounter {
   }
 
   private async connectToDevice(device: Device) {
-    console.log("connecting...");
     this.device = await device.connect();
     this.subscriptions.push(this.device.onDisconnected(this.onDisconnected));
-    // this is necessary even if we think we know everything by ID
+    // Required step
     await this.device.discoverAllServicesAndCharacteristics();
+
     this.subscriptions.push(
       this.device.monitorCharacteristicForService(SERVICE_HKFC, CHARACTERISTIC_ROW_STITCH, this.onCharacteristicUpdate),
     );
+
     // Read current count & mode once at startup
     await Promise.allSettled([this.readMode(), this.readCount()]);
+
     this.events.emit("connectionStateChanged", "connected");
     console.log("connected!");
   }
