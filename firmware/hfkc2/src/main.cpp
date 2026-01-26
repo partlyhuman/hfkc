@@ -1,58 +1,220 @@
-#include <Arduino.h>
+#include "main.h"
 
-#include "U8g2lib.h"
+#include <AceButton.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <esp_log.h>
 
-U8G2_SSD1306_72X40_ER_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, 6, 5);
+#include "config.h"
+#include "display.h"
+#include "prefs.h"
+#include "sleep.h"
 
-// #include "Adafruit_SSD1306.h"
+using namespace ace_button;
 
-// Adafruit_SSD1306 display;
+static AceButton button(BUTTON_PIN);
+unsigned long lastActivityMs;
 
-// void setup() {
-//   Serial.begin(115200);
-//   delay(250);
+static BLEServer *server;
+static BLECharacteristic *countCharacteristic;
+static BLECharacteristic *modeCharacteristic;
 
-//   Serial.println("STARTING");
-//   if (!Wire.begin(SCREEN_I2C_SDA, SCREEN_I2C_SCL)) {
-//     Serial.println("WIRE FAIL");
-//   }
-//   display = Adafruit_SSD1306(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
-//   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-//     Serial.println("DISPLAY FAIL");
-//   }
+Mode mode;
+CombinedCount count;
 
-//   Serial.printf("Using %dx%d\n", SCREEN_WIDTH, SCREEN_HEIGHT);
+void flashLED(int count, int dur) {
+  for (int i = 0; i < count; i++) {
+    digitalWrite(LED_BUILTIN, LED_ON);
+    delay(dur);
+    digitalWrite(LED_BUILTIN, LED_OFF);
+    delay(dur);
+  }
+}
 
-//   // Wait for display
-//   delay(500);
+void countCharacteristicUpdate() {
+  countCharacteristic->setValue((uint8_t *)&count, sizeof(CombinedCount));
+  countCharacteristic->notify();
+}
 
-//   display.clearDisplay();
-//   display.display();
-//   delay(1000);
-//   display.setFont(NULL);
-//   display.setTextColor(WHITE);
-//   display.setCursor(0, 20);
-//   display.println("Woohoo");
-//   display.display();
-// }
+void updateAll() {
+  countCharacteristicUpdate();
+  displayUpdate();
+  prefsUpdateCount();
+}
+
+void handleButtonEvent(AceButton *_button, uint8_t eventType,
+                       uint8_t buttonState) {
+  lastActivityMs = millis();
+  switch (eventType) {
+    case AceButton::kEventPressed:
+      digitalWrite(LED_BUILTIN, LOW);
+      break;
+    case AceButton::kEventReleased:
+      digitalWrite(LED_BUILTIN, HIGH);
+      break;
+    case AceButton::kEventClicked:
+      if (mode == MODE_COUNT_ROW_STITCH) {
+        count.stitch++;
+      } else if (mode == MODE_COUNT_ROW) {
+        count.row++;
+      }
+      updateAll();
+      break;
+    case AceButton::kEventLongPressed:
+      if (mode == MODE_COUNT_ROW_STITCH) {
+        count.stitch = 0;
+        count.row++;
+      } else if (mode == MODE_COUNT_ROW) {
+        // do the same as a short press
+        count.row++;
+      }
+      updateAll();
+      break;
+  }
+}
+
+BLEDescriptor *userDescription(const char *str) {
+  BLEDescriptor *desc = new BLEDescriptor(CHARACTERISTIC_USER_DESCRIPTION);
+  desc->setValue(str);
+  return desc;
+}
+
+// Could combine callback classes and check UUID but this is more flexible
+class ModeCharacteristicCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
+    BLECharacteristicCallbacks::onWrite(c);  // super
+    mode = *(Mode *)(c->getData());
+    log_i("Set mode %d", mode);
+
+    // This is the only place mode gets updated so save it manually
+    prefsUpdateMode();
+    // probably best to reset too
+    count = {};
+    updateAll();
+  }
+};
+
+class CountCharacteristicCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
+    BLECharacteristicCallbacks::onWrite(c);  // super
+    count = *(CombinedCount *)(c->getData());
+    // CombinedCount *value = (CombinedCount*)(c->getData());
+    // count.row = value->row;
+    // count.stitch = value->stitch;
+    updateAll();
+  }
+};
+
+class ServerCallbacks : public BLEServerCallbacks {
+  void onDisconnect(BLEServer *s) override {
+    BLEServerCallbacks::onDisconnect(s);  // super
+    if (s->getConnectedCount() == 0) {
+      log_d("All clients disconnected, going back to advertise");
+      lastActivityMs = millis();
+      BLEDevice::startAdvertising();
+    } else {
+      log_d("Disconnected but other clients are still connected");
+    }
+  }
+  void onConnect(BLEServer *s) override {
+    BLEServerCallbacks::onConnect(s);
+    lastActivityMs = millis();
+  }
+};
+
+unsigned long idleFor() {
+  if (server->getConnectedCount() > 0 || lastActivityMs == 0) {
+    return 0;
+  }
+  return millis() - lastActivityMs;
+}
+
+void btleTeardown() {
+  // service->stop();
+  BLEDevice::stopAdvertising();
+  BLEDevice::deinit(true);
+}
 
 void setup() {
   Serial.begin(115200);
-  delay(250);
-  Serial.println("STARTING");
+  delay(100);
 
-  u8g2.begin();
-  u8g2.setFontMode(1);
-  u8g2.setBitmapMode(1);
-  u8g2.setFont(u8g2_font_4x6_tr);
-  u8g2.drawStr(1, 6, "What uppp!!");
-  u8g2.drawStr(40, 39, "Yoooooo!");
-  u8g2.drawFrame(1, 7, 69, 26);
-  u8g2.drawLine(4, 25, 42, 11);
-  u8g2.drawLine(19, 14, 57, 26);
-  u8g2.sendBuffer();
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LED_OFF);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  bool bootedWithButtonPressed = digitalRead(BUTTON_PIN) == LOW;
+
+  ButtonConfig *buttonConfig = button.getButtonConfig();
+  buttonConfig->setDebounceDelay(1);
+  buttonConfig->setClickDelay(999);
+  buttonConfig->setLongPressDelay(1000);
+  buttonConfig->setFeature(ButtonConfig::kFeatureClick);
+  buttonConfig->setFeature(ButtonConfig::kFeatureLongPress);
+  buttonConfig->setEventHandler(handleButtonEvent);
+
+  displaySetup();
+  prefsSetup();
+  // Sleep setup after prefs setup so we can increment if waking from sleep by
+  // tap
+  if (sleepSetup()) {
+    // DISABLED - I'm not sure this is a good idea. I think you don't want to
+    // have to guess whether it just went up or not. If you've left it for like
+    // 15 minutes on end, you're going to glance at the counter before tapping
+    // and see it's asleep. If we try and increment when waking up, I feel like
+    // users will be in a guessing game.
+
+    // log_i("Woke from sleep by GPIO - counting this as a button press and
+    // incrementing"); flashLED(1); if (mode == MODE_COUNT_ROW_STITCH) {
+    //   count.stitch++;
+    // } else if (mode == MODE_COUNT_ROW) {
+    //   count.row++;
+    // }
+  }
+  // else if (bootedWithButtonPressed) {
+  //   // Reset if booting with pedal held
+  //   count = {};
+  // }
+
+  BLEDevice::init("Hands-Free Knit Counter");
+
+  server = BLEDevice::createServer();
+  server->setCallbacks(new ServerCallbacks());
+
+  BLEService *service = server->createService(SERVICE_HKFC);
+
+  countCharacteristic = service->createCharacteristic(
+      CHARACTERISTIC_ROW_STITCH, BLECharacteristic::PROPERTY_READ |
+                                     BLECharacteristic::PROPERTY_WRITE |
+                                     BLECharacteristic::PROPERTY_NOTIFY);
+  countCharacteristic->addDescriptor(userDescription("Row/Stitch Count"));
+  countCharacteristic->setCallbacks(new CountCharacteristicCallbacks());
+  countCharacteristic->setValue((uint8_t *)&count, sizeof(CombinedCount));
+
+  modeCharacteristic = service->createCharacteristic(
+      CHARACTERISTIC_MODE,
+      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+  modeCharacteristic->addDescriptor(userDescription("Mode"));
+  modeCharacteristic->setCallbacks(new ModeCharacteristicCallbacks());
+  uint16_t modeValue = static_cast<uint16_t>(mode);
+  modeCharacteristic->setValue(modeValue);
+
+  service->start();
+
+  BLEAdvertising *advertising = BLEDevice::getAdvertising();
+  advertising->addServiceUUID(SERVICE_HKFC);
+  advertising->setScanResponse(true);
+  // functions that help with iPhone connections issue
+  advertising->setMinPreferred(0x06);
+  advertising->setMaxPreferred(0x12);
+  BLEDevice::startAdvertising();
+
+  lastActivityMs = millis();
+  updateAll();
+  Serial.println("Setup complete");
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+  button.check();
+  sleepUpdate();
 }
