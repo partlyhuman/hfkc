@@ -14,6 +14,8 @@ struct CombinedCount {
 };
 extern CombinedCount count;
 
+extern bool connected;
+
 void flashLED(int count = 1, int dur = 150);
 void countCharacteristicUpdate();
 void updateAll();

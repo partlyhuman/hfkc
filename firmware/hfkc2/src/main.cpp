@@ -23,6 +23,7 @@ static BLECharacteristic *modeCharacteristic;
 
 Mode mode;
 CombinedCount count;
+bool connected;
 
 void flashLED(int count, int dur) {
   for (int i = 0; i < count; i++) {
@@ -116,12 +117,16 @@ class ServerCallbacks : public BLEServerCallbacks {
       log_d("All clients disconnected, going back to advertise");
       lastActivityMs = millis();
       BLEDevice::startAdvertising();
+      connected = false;
+      displayUpdate();
     }
   }
   void onConnect(BLEServer *s) override {
     BLEServerCallbacks::onConnect(s);
     auto connectedCount = s->getConnectedCount();
     log_i("CONNECTED! OLD count=%d", connectedCount);
+    connected = true;
+    displayUpdate();
     lastActivityMs = millis();
   }
 };
